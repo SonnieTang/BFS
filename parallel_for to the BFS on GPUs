@@ -1,1 +1,126 @@
+#include <chrono>
+#include <CL/sycl.hpp>
+#include <array>
+#include <random>
+#include <iostream>
+#include <vector>
+
+using namespace sycl;
+
+constexpr int NUM_VERTICES = 68;
+
+void BFS(queue& q, buffer<int, 2>& adjMatrix, int numVertices) {
+  
+  auto t0 = std::chrono::high_resolution_clock::now();
+  range<2> buf_range_2d(numVertices, numVertices);
+  buffer<int, 2> visited_buf_2d(buf_range_2d);
+  buffer<int, 2> print_buf_2d(buf_range_2d);
+  buffer<int, 1> kk(4);
+
+  q.submit([&](handler& cgh) {
+    auto adjMatrix_acc = adjMatrix.get_access<access::mode::read>(cgh);
+    auto visited_accessors = visited_buf_2d.get_access<access::mode::read_write>(cgh);
+    auto print_accessors = print_buf_2d.get_access<access::mode::write>(cgh);
+    auto tem=kk.get_access<access::mode::write>(cgh);
+
+    cgh.parallel_for(
+      range<2>(NUM_VERTICES, NUM_VERTICES),[=](item<2> item){
+      std::array<std::array<int, NUM_VERTICES>, NUM_VERTICES> queue;
+      
+     // print_accessors[item.get_id(0)][item.get_id(1)] =2;
+      visited_accessors[item.get_id(0)][item.get_id(1)] =false;
+      //for(int j=0;j<numVertices;j++){
+        int j = item.get_id(0);
+        // for (int i =0; i < numVertices; i++){
+        // queue[j][i]=2;    
+        // }
+        queue[j][0]=j;
+
+        int idx=0;
+        int end = idx +1;
+        int order =0;
+        while (idx < numVertices) {
+          int currVertex = queue[j][idx];
+          idx++;
+          print_accessors[j][order] = currVertex;
+          visited_accessors[j][currVertex] = true;
+          order++;
+          for (int i =0; i < numVertices; i++) {
+            if (adjMatrix_acc[currVertex][i] && !visited_accessors[j][i]) {
+              visited_accessors[j][i] = true;
+              queue[j][end] = i;
+              end++;
+            }
+          }
+        }
+    });
+  });
+  q.wait_and_throw();
+
+
+  // Print the results
+
+  auto print_acc = print_buf_2d.get_access<access::mode::read>();
+
+  auto t1 = std::chrono::high_resolution_clock::now();
+  std::chrono::duration< double > fs = t1 - t0;
+  std::chrono::milliseconds d = std::chrono::duration_cast< std::chrono::milliseconds >( fs );
+  std::cout <<  fs.count() << "\n";
+  std::cerr <<  fs.count() << "\n";
+
+
+  for (int i = 0; i < numVertices; i++) {
+    for(int j =0;j<numVertices;j++){
+      std::cout << "Visited " << print_acc[i][j] << " ";
+    }
+    std::cout << '\n';
+  }
+  std::cout << std::endl;
+
+  
+}
+
+int main() {
+  const int numVertices = NUM_VERTICES;
+  
+
+
+  queue q(gpu_selector{});
+  buffer<int, 2> adjMatrix(range<2>(numVertices, numVertices));     
+
+  {
+    auto adjMatrix_acc = adjMatrix.get_access<access::mode::write>();
+    //initialization
+    for (int i=0;i<numVertices;i++){
+      for(int j=0; j<numVertices;j++){
+        adjMatrix_acc[i][j]=0;
+      }
+    }
+    //make sure all the vertices connected;
+    for (int i=1;i<numVertices;i++){
+      std::random_device rd;
+      std::mt19937 gen(rd());
+      std::uniform_int_distribution<> distr(0, i-1); 
+      int random_num = distr(gen);
+      adjMatrix_acc[random_num][i] = 1;
+      adjMatrix_acc[i][random_num] = 1;
+    }
+    //add some additional edges;(number is numVertices,including self-reference)
+    for (int i=0;i<numVertices;i++){
+      std::random_device rd;
+      std::mt19937 gen(rd());
+      std::uniform_int_distribution<> distr(0, numVertices-1); 
+      int random_num1 = distr(gen);
+      int random_num2 = distr(gen);
+      adjMatrix_acc[random_num1][random_num2] = 1;
+      adjMatrix_acc[random_num2][random_num1] = 1;
+    }
+
+ }
+
+  BFS(q, adjMatrix, numVertices);
+  
+  return 0;
+}
+
 
