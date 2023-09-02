@@ -1,0 +1,82 @@
+#include <CL/sycl.hpp>
+#include <iostream>
+#include <vector>
+
+using namespace sycl;
+
+void BFS(queue& q, buffer<int, 2>& adjMatrix, int startVertex, int numVertices) {
+  buffer<bool, 1> visited_buf(numVertices);
+  buffer<int, 1> queue_buf(numVertices);
+  buffer<int, 1> print_buf(numVertices);
+
+  q.submit([&](handler& cgh) {
+    auto visited_acc = visited_buf.get_access<access::mode::read_write>(cgh);
+    auto queue_acc = queue_buf.get_access<access::mode::read_write>(cgh);
+    auto adjMatrix_acc = adjMatrix.get_access<access::mode::read>(cgh);
+    auto print_acc = print_buf.get_access<access::mode::write>(cgh);
+
+    cgh.single_task([=]() {
+      for (int i = 0; i < numVertices; i++) {
+        visited_acc[i] = false;
+      }
+
+      int queue_front = 0;
+      int queue_back = 0;
+      int print_index = 0;
+
+      visited_acc[startVertex] = true;
+      queue_acc[queue_back++] = startVertex;
+
+      while (queue_front != queue_back) {
+        int currVertex = queue_acc[queue_front++];
+        print_acc[print_index++] = currVertex;
+
+        for (int i = 0; i < numVertices; i++) {
+          if (adjMatrix_acc[currVertex][i] && !visited_acc[i]) {
+            visited_acc[i] = true;
+            queue_acc[queue_back++] = i;
+          }
+        }
+      }
+    });
+  });
+
+  q.wait_and_throw();
+
+  // Print the results
+  auto print_acc = print_buf.get_access<access::mode::read>();
+  for (int i = 0; i < numVertices; i++) {
+    std::cout << "Visited " << print_acc[i] << " ";
+  }
+  std::cout << std::endl;
+}
+
+int main() {
+  const int numVertices = 4;
+  queue q;
+  buffer<int, 2> adjMatrix(range<2>(numVertices, numVertices));
+
+  // Initialize  adjacency matrix with zeros
+  {
+    auto adjMatrix_acc = adjMatrix.get_access<access::mode::write>();
+    for (int i = 0; i < numVertices; ++i) {
+      for (int j = 0; j < numVertices; ++j) {
+        adjMatrix_acc[i][j] = 0;
+      }
+    }
+  }
+
+  {
+    auto adjMatrix_acc = adjMatrix.get_access<access::mode::write>();
+    adjMatrix_acc[0][1] = adjMatrix_acc[1][0] = 1;
+    adjMatrix_acc[0][2] = adjMatrix_acc[2][0] = 1;
+    adjMatrix_acc[1][2] = adjMatrix_acc[2][1] = 1;
+    adjMatrix_acc[2][3] = adjMatrix_acc[3][2] = 1;
+    adjMatrix_acc[3][3] = adjMatrix_acc[3][3] = 1; 
+  }
+
+
+  BFS(q, adjMatrix, 3, numVertices);
+
+  return 0;
+}
